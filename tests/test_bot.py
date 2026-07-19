@@ -52,6 +52,8 @@ def test_create_response_always_sets_combined_instructions(
         model="gpt-5.4",
         input="Hello",
         instructions="base + db",
+        tools=bot.FIRESTORE_TOOLS,
+        parallel_tool_calls=False,
     )
 
 
@@ -162,7 +164,9 @@ def test_handle_request_continues_active_topic(monkeypatch: pytest.MonkeyPatch) 
         model="gpt-5.4",
         input="What permissions does it need?",
         previous_response_id="resp-old",
-        instructions="",
+        instructions=bot.BASE_INSTRUCTIONS,
+        tools=bot.FIRESTORE_TOOLS,
+        parallel_tool_calls=False,
     )
     batch = db.batch.return_value
     assert batch.set.call_count == 2
@@ -205,7 +209,9 @@ def test_handle_request_starts_new_topic_without_previous_response(
     client.responses.create.assert_called_once_with(
         model="gpt-5.4",
         input="A new subject",
-        instructions="",
+        instructions=bot.BASE_INSTRUCTIONS,
+        tools=bot.FIRESTORE_TOOLS,
+        parallel_tool_calls=False,
     )
 
 
@@ -267,5 +273,7 @@ def test_handle_request_saves_preference_before_answer(
     client.responses.create.assert_called_once_with(
         model="gpt-5.4",
         input="Please use metric units from now on.",
-        instructions="Prefer metric units.",
+        instructions=f"{bot.BASE_INSTRUCTIONS}\nPrefer metric units.",
+        tools=bot.FIRESTORE_TOOLS,
+        parallel_tool_calls=False,
     )
