@@ -1,5 +1,6 @@
 """Centralized OpenAI requests and user-scoped topic routing."""
 
+import json
 import re
 from typing import Any, Literal
 
@@ -7,10 +8,16 @@ from google.cloud import firestore
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-BASE_INSTRUCTIONS = ""
+from app.firestore_tools import FIRESTORE_TOOLS, execute_firestore_tool
+
+BASE_INSTRUCTIONS = (
+    "You are an OpenAI bot running in Google Cloud with access to a (default) "
+    "Firestore database"
+)
 BOT_CONFIG_COLLECTION = "config"
 BOT_CONFIG_DOCUMENT = "bot"
 CONVERSATION_STATE_DOCUMENT = "conversation"
+MAX_TOOL_ROUNDS = 5
 TOPIC_ROUTER_PROMPT = """Classify the user's message for conversation routing.
 Use `continue` for follow-ups, short questions, pronouns, or messages that rely
 on the active topic. Use `switch` only when an existing topic is clearly named.
@@ -49,7 +56,15 @@ def build_instructions(db: firestore.Client, user_id: str) -> str:
     stored_instructions = (snapshot.to_dict() or {}).get("instructions", "")
     if not isinstance(stored_instructions, str):
         raise TypeError("The Firestore instructions entry must be a string")
-    return BASE_INSTRUCTIONS + stored_instructions
+    separator = (
+        "\n"
+        if BASE_INSTRUCTIONS
+        and stored_instructions
+        and not BASE_INSTRUCTIONS[-1].isspace()
+        and not stored_instructions[0].isspace()
+        else ""
+    )
+    return BASE_INSTRUCTIONS + separator + stored_instructions
 
 
 def create_response(
@@ -58,9 +73,48 @@ def create_response(
     user_id: str,
     **request: Any,
 ) -> Any:
-    """Create an OpenAI response with the current combined instructions."""
-    request["instructions"] = build_instructions(db, user_id)
-    return client.responses.create(**request)
+    """Create a response, executing user-scoped Firestore tool calls."""
+    instructions = build_instructions(db, user_id)
+    request.update(
+        instructions=instructions,
+        tools=FIRESTORE_TOOLS,
+        parallel_tool_calls=False,
+    )
+    response = client.responses.create(**request)
+
+    for _ in range(MAX_TOOL_ROUNDS):
+        calls = [item for item in response.output if item.type == "function_call"]
+        if not calls:
+            return response
+
+        outputs = []
+        for call in calls:
+            try:
+                output = execute_firestore_tool(
+                    db,
+                    user_id,
+                    call.name,
+                    call.arguments,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                output = json.dumps({"error": str(exc)})
+            outputs.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call.call_id,
+                    "output": output,
+                }
+            )
+        response = client.responses.create(
+            model=request["model"],
+            previous_response_id=response.id,
+            input=outputs,
+            instructions=instructions,
+            tools=FIRESTORE_TOOLS,
+            parallel_tool_calls=False,
+        )
+
+    raise RuntimeError("The model exceeded the Firestore tool-call limit")
 
 
 def append_user_instruction(

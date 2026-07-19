@@ -94,4 +94,11 @@ Bot instructions are composed for every OpenAI Responses API call in `app.bot.cr
 
 The same routing decision can extract a concise `instruction_update` when the user states a general preference or instruction for future requests. The service appends non-empty, non-duplicate updates to `users/{user_id}/config/bot.instructions` before creating the answer, so the preference applies immediately. Request-specific directions are not persisted.
 
+User-facing responses can call three Firestore tools: read one document, list
+documents, or create/replace one document. These operations are restricted in
+application code to `users/{user_id}/data/{key}`. Keys may contain only letters,
+digits, underscores, and hyphens; the model cannot supply a user ID or access
+the protected `config`, `state`, or `topics` collections. Tool execution is
+limited to five sequential rounds per response.
+
 For a private management API, omit `--allow-unauthenticated` and invoke it with an identity token.
