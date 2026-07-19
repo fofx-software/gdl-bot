@@ -16,6 +16,10 @@ Minimal FastAPI scaffold for an OpenAI bot-management service hosted on Google C
 
 Python 3.12 and Google Cloud Application Default Credentials are expected.
 
+Copy `.env.example` to `.env` and populate the required secrets before running
+the Telegram integration locally. In Cloud Run, store secret values in Secret
+Manager rather than deploying a populated `.env` file.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
@@ -24,6 +28,28 @@ gcloud auth application-default login
 ```
 
 Then open <http://localhost:8000/docs>. The liveness endpoint works without credentials; `/ready` queries Firestore.
+
+## Connect Telegram
+
+Create a bot with Telegram's `@BotFather`, copy `.env.example` to `.env`, and
+set the bot token, OpenAI API key, and a random webhook secret. The deployment
+script discovers the Cloud Run URL and registers its `/telegram` webhook after
+every successful deployment:
+
+```bash
+scripts/deploy.sh \
+  --service-account gdl-bot-runtime@PROJECT_ID.iam.gserviceaccount.com \
+  --allow-unauthenticated
+```
+
+The script uses the active gcloud project. Override its defaults with
+`CLOUD_RUN_SERVICE` or `CLOUD_RUN_REGION`, or register separately with
+`.venv/bin/python -m app.telegram_setup --project PROJECT_ID`.
+
+Telegram sends text-message updates to `POST /telegram`. The service validates
+the webhook secret header, uses the Telegram sender ID as the application user
+ID, routes the message through its user-scoped topic state, and replies through
+Telegram's `sendMessage` API. Unsupported updates are acknowledged and ignored.
 
 ## Test
 
@@ -52,12 +78,10 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
   --role="roles/datastore.user"
 ```
 
-Build and deploy from this directory:
+Build, deploy, and register the Telegram webhook from this directory:
 
 ```bash
-gcloud run deploy gdl-bot \
-  --source . \
-  --region us-east4 \
+scripts/deploy.sh \
   --service-account gdl-bot-runtime@PROJECT_ID.iam.gserviceaccount.com \
   --allow-unauthenticated
 ```
